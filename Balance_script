@@ -1,0 +1,91 @@
+-- explain
+with
+    first_payments as -------------------------------------------------------------------------------- первые оплаты
+    (
+    select user_id
+        ,date_trunc ('day', min (transaction_datetime)) as first_payment_date
+    from skyeng_db.payments
+    where status_name = 'success'
+    group by user_id
+    )
+    , all_dates as ------------------------------------------------------------------------ все даты уроков в 2016 г.
+    (
+    select distinct date_trunc ('day', class_start_datetime) as dt
+    from skyeng_db.classes 
+    where date_part ('year', class_start_datetime) = '2016'
+    )
+    , all_dates_by_user as -------------------------------------все даты у всех студентов после первой оплаты каждого
+    (
+    select user_id, dt
+    from all_dates ad
+    join first_payments fp
+        on dt>=first_payment_date
+    )
+    , payments_by_dates as ---------------------------------------------------------------------- все платежи по датам
+    (
+    select user_id
+        , date_trunc ('day', transaction_datetime) as payment_date
+        , sum (classes) as transaction_balance_change
+    from skyeng_db.payments
+    where status_name = 'success'
+        group by user_id, payment_date
+    )
+    , payments_by_dates_cumsum as ------------------------------------------------------------ баланс платежей по датам
+    (
+    select adbu.user_id
+        , dt
+        , transaction_balance_change
+        , case when (sum(transaction_balance_change) over (partition by adbu.user_id order by adbu.dt)) is null then 0 else (sum(transaction_balance_change) over (partition by adbu.user_id order by adbu.dt)) end as transaction_balance_change_cs
+    from all_dates_by_user adbu
+    left join payments_by_dates pbd on adbu.user_id=pbd.user_id and dt=payment_date
+    )
+    , classes_by_dates as ------------------------------------------------------------------- пройденные уроки по датам
+    (
+    select user_id
+        , date_trunc ('day', class_start_datetime) as class_date
+        , count(id_class) * -1 as classes
+    from skyeng_db.classes
+    where class_status in ('success', 'failed_by_student')
+        and class_type != 'trial'
+    group by user_id, date_trunc ('day', class_start_datetime)
+    )
+    , classes_by_dates_dates_cumsum as ----------------------------------------------- баланс пройденных уроков по датам
+    (
+    select adbu.user_id
+        , dt
+        , classes
+        , case when (sum(classes) over (partition by adbu.user_id order by dt)) is null then 0 else (sum(classes) over (partition by adbu.user_id order by dt)) end as classes_cs
+    from all_dates_by_user adbu
+    left join classes_by_dates cbd on adbu.user_id=cbd.user_id and adbu.dt=cbd.class_date
+    )
+    , balances as --------------------------------------- общий баланс каждого студента по платежам и пройденным  урокам
+    (
+    select p_cs.user_id
+        , c_cs.dt
+        , transaction_balance_change
+        , transaction_balance_change_cs
+        , classes
+        , c_cs.classes_cs
+        , c_cs.classes_cs+transaction_balance_change_cs as balance
+    from payments_by_dates_cumsum p_cs 
+    join classes_by_dates_dates_cumsum c_cs on p_cs.user_id=c_cs.user_id and p_cs.dt=c_cs.dt
+    order by 2
+    -- limit 1000
+    ) 
+    select dt--------------------------------------- общий баланс платежей и пройденных уроков всеми студентами по датам
+        , sum (transaction_balance_change) as transaction_balance_change_res
+        , sum (transaction_balance_change_cs) as transaction_balance_change_cs_res
+        , sum (classes) as classes_res
+        , sum (classes_cs) as classes_cs_res
+        , sum (transaction_balance_change)+sum (classes) as balance_res
+        , sum (balance) as balance_cs_res
+    from balances
+    group by dt
+    order by dt
+    
+    
+-- ОБЩИЕ ВЫВОДЫ.
+-- В течение года куммулятивная сумма пройденных и оплаченных уроков равномерно возрастает.
+-- Общий баланс в течение года непостоянен, в большей степени коррелирует с транзакциями (оплатами), пики которых приходятся на начало и/или конец календарного месяца,
+-- значительное колебание связано, вероятно, со способом оплат - превалирует разовая оплата за большое количество уроков.
+
