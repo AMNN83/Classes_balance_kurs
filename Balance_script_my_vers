@@ -1,0 +1,97 @@
+-- explain
+
+----------Var.1--(без обрезания уроков до первых оплат)-----------------------------------------------------------------------------------------
+-- select 
+--     -- *
+--     dt, classes
+--     , sum(classes) over (partition by user_id order by user_id, dt) as balance
+--     , sum(classes) over (partition by dt order by dt) as sum_by_dates
+--     , sum(classes) over (order by dt) as sum_cum_all
+--     , sum(classes) over () as sum_all
+-- from (
+--     select c.user_id, date_trunc ('day', c.class_start_datetime) as dt, '-1' as classes
+--     from skyeng_db.classes c
+--     where c.class_type != 'trial' and c.class_status in ('success', 'failed_by_student') and c.class_start_datetime < '2017-01-01'
+--     union all
+--     select p.user_id, date_trunc ('day', p.transaction_datetime) as dt, p.classes 
+--     from skyeng_db.payments p
+--     where p.status_name = 'success' and p.transaction_datetime < '2017-01-01'
+--     -- order by user_id, dt
+--     ) t
+--     order by dt
+--     -- limit 1000
+
+
+----------Var.2--(уроки до первых оплат исключены)----------------------------------------------------------------------------------------------    
+
+with t1 as------------------------------------------------------------------------------все успешные уроки и первые оплаты
+    (
+    select c.user_id
+        , id_class
+        , date_trunc ('day', class_start_datetime) as c_dt
+        , min (date_trunc ('day', transaction_datetime)) as first_payment_date
+    from skyeng_db.classes c
+    left join skyeng_db.payments p
+    on c.user_id=p.user_id 
+    where class_type != 'trial'
+        and class_status in ('success', 'failed_by_student')
+        and status_name = 'success'
+        and class_start_datetime < '2017-01-01'
+        and transaction_datetime < '2017-01-01'
+    group by 1, 2
+    order by 3
+    )
+    , t2 as-----------------------------------------------------------------------------------все уроки после первых оплат
+    (
+    select *
+    from t1
+    where c_dt>=first_payment_date
+    )
+    , t3 as---------------------------------------------------------------------------------------------все успешные оплаты
+    (
+    select user_id 
+        , date_trunc ('day', transaction_datetime) as p_dt
+        , sum (classes) as transactions
+    from skyeng_db.payments p
+    where status_name = 'success' and transaction_datetime < '2017-01-01'
+    group by 1, 2
+    order by 1
+    )
+    , t4 as-----------------------------------------------------------------------------объединенная таблица уроков и оплат
+    (
+    select
+        user_id,
+        c_dt as dt 
+        , count (id_class)*(-1) as classes
+        , 0 as transactions
+    from t2
+    group by 1, 2
+    union all
+    select
+        user_id,
+        p_dt as dt
+        , 0 as classes
+        , transactions
+    from t3
+    order by 2
+    )
+    , t5 as---------------------------------------------------------------------------------------------- то же сокращенно
+    (
+    select
+        -- user_id,
+        dt 
+        , sum (classes) as classes
+        , sum (transactions) as transactions
+    from t4
+    group by dt
+    -- , user_id
+    order by dt
+    -- limit 1000
+    )
+    select dt----------------------------------------------------------- итоги с кумулятивными суммами и балансом по датам
+        , classes
+        , sum (classes) over (order by dt) as classes_cs
+        , transactions
+        , sum (transactions) over (order by dt) as transactions_cs
+        , sum (transactions+classes) over (order by dt) as balance_cs
+    from t5
