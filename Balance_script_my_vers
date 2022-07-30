@@ -10,11 +10,11 @@
 --     , sum(classes) over () as sum_all
 -- from (
 --     select c.user_id, date_trunc ('day', c.class_start_datetime) as dt, '-1' as classes
---     from skyeng_db.classes c
+--     from db.classes c
 --     where c.class_type != 'trial' and c.class_status in ('success', 'failed_by_student') and c.class_start_datetime < '2017-01-01'
 --     union all
 --     select p.user_id, date_trunc ('day', p.transaction_datetime) as dt, p.classes 
---     from skyeng_db.payments p
+--     from db.payments p
 --     where p.status_name = 'success' and p.transaction_datetime < '2017-01-01'
 --     -- order by user_id, dt
 --     ) t
@@ -31,7 +31,7 @@ with t1 as----------------------------------------------------------------------
         , date_trunc ('day', class_start_datetime) as c_dt
         , min (date_trunc ('day', transaction_datetime)) as first_payment_date
     from skyeng_db.classes c
-    left join skyeng_db.payments p
+    left join db.payments p
     on c.user_id=p.user_id 
     where class_type != 'trial'
         and class_status in ('success', 'failed_by_student')
@@ -52,7 +52,7 @@ with t1 as----------------------------------------------------------------------
     select user_id 
         , date_trunc ('day', transaction_datetime) as p_dt
         , sum (classes) as transactions
-    from skyeng_db.payments p
+    from db.payments p
     where status_name = 'success' and transaction_datetime < '2017-01-01'
     group by 1, 2
     order by 1
