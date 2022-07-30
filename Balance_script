@@ -4,14 +4,14 @@ with
     (
     select user_id
         ,date_trunc ('day', min (transaction_datetime)) as first_payment_date
-    from skyeng_db.payments
+    from db.payments
     where status_name = 'success'
     group by user_id
     )
     , all_dates as ------------------------------------------------------------------------ все даты уроков в 2016 г.
     (
     select distinct date_trunc ('day', class_start_datetime) as dt
-    from skyeng_db.classes 
+    from db.classes 
     where date_part ('year', class_start_datetime) = '2016'
     )
     , all_dates_by_user as -------------------------------------все даты у всех студентов после первой оплаты каждого
@@ -26,7 +26,7 @@ with
     select user_id
         , date_trunc ('day', transaction_datetime) as payment_date
         , sum (classes) as transaction_balance_change
-    from skyeng_db.payments
+    from db.payments
     where status_name = 'success'
         group by user_id, payment_date
     )
@@ -44,7 +44,7 @@ with
     select user_id
         , date_trunc ('day', class_start_datetime) as class_date
         , count(id_class) * -1 as classes
-    from skyeng_db.classes
+    from db.classes
     where class_status in ('success', 'failed_by_student')
         and class_type != 'trial'
     group by user_id, date_trunc ('day', class_start_datetime)
